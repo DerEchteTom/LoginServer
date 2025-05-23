@@ -3,3 +3,6 @@
 *.db
 encryption.key
 *.log
+krb5.conf
+.editorconfig
+.gitattributes
