@@ -1,9 +1,9 @@
 <?php
-// Datei: admin_tab_status.php – Stand: 2025-05-09 13:35:12 Europe/Berlin
+// File: admin_tab_status.php – generated on 2025-06-12 08:10:25 
 session_start();
 date_default_timezone_set('Europe/Berlin');
 
-// Komponentenzustände prüfen
+// --- Helper functions ---
 function checkFile($path) {
     return [
         'exists' => file_exists($path),
@@ -13,16 +13,33 @@ function checkFile($path) {
     ];
 }
 
+function getFilePerms($path) {
+    return file_exists($path) ? substr(sprintf('%o', fileperms($path)), -3) : '---';
+}
+
+function testPdoWrite($file, &$error = '') {
+    try {
+        $pdo = new PDO("sqlite:$file");
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec("CREATE TABLE IF NOT EXISTS _writetest (id INTEGER)");
+        $pdo->exec("DROP TABLE IF EXISTS _writetest");
+        return true;
+    } catch (Exception $e) {
+        $error = $e->getMessage();
+        return false;
+    }
+}
+
 function statusBadge($ok) {
     return $ok ? '<span class="badge border border-success text-success">Yes</span>'
                : '<span class="badge border border-danger text-danger">No</span>';
 }
 
 function getEncStatus($file) {
-    if (!file_exists($file)) return "❌ missing";
+    if (!file_exists($file)) return "missing";
     $txt = file_get_contents($file);
-    if (strpos($txt, 'ENC:') !== false || strpos($txt, 'XOR:') !== false) return "✅ yes";
-    return "🔓 no";
+    if (strpos($txt, 'ENC:') !== false || strpos($txt, 'XOR:') !== false) return "yes";
+    return "no";
 }
 
 function getMailerStatus() {
@@ -36,121 +53,160 @@ function getMailerStatus() {
         $diag[] = "Autoload available";
         require_once $autoloadPath;
         if (class_exists($cls)) {
-            $diag[] = "class loaded";
+            $diag[] = "Class loaded";
             if (method_exists($cls, 'send')) {
-                $status = "Ja";
-                $diag[] = "send()-method available";
+                $status = "Yes";
+                $diag[] = "send() available";
             } else {
-                $diag[] = "send()-method missing";
+                $diag[] = "send() missing";
             }
         } else {
-            $diag[] = "class missing";
+            $diag[] = "Class missing";
         }
     } else {
-        $diag[] = "autoload missing";
+        $diag[] = "Autoload missing";
     }
     return [$status, $diag];
 }
 
-$dbFileStatus = checkFile("users.db");
-$dbinfo = checkFile("info.db");
-$dbcms = checkFile("cms.db");
-$audit = checkFile("audit.log");
-$error = checkFile("error.log");
-$env = checkFile(".env");
-$envad = checkFile(".envad");
-$encryption = checkFile("encryption.key");
+// --- File checks ---
+$files = [
+    'users.db' => checkFile('users.db'),
+    'cms.db' => checkFile('cms.db'),
+    'encryption.key' => checkFile('encryption.key'),
+    'audit.log' => checkFile('audit.log'),
+    'error.log' => checkFile('error.log'),
+    '.env' => checkFile('.env'),
+    '.envad' => checkFile('.envad')
+];
 
-$envEnc = getEncStatus(".env");
-$envadEnc = getEncStatus(".envad");
+foreach (['users.db', 'cms.db'] as $db) {
+    $files[$db]['chmod'] = getFilePerms($db);
+    $files[$db]['pdo_error'] = '';
+    $files[$db]['pdo'] = testPdoWrite($db, $files[$db]['pdo_error']);
+}
+
+$files['.env']['enc'] = getEncStatus('.env');
+$files['.envad']['enc'] = getEncStatus('.envad');
 
 list($mailerStatus, $mailerDiag) = getMailerStatus();
 
-// Sitzungen zählen
 $sessionDir = session_save_path();
-$active = 0;
-$admins = 0;
-$users = 0;
-
-if (is_dir($sessionDir)) {
+$active = $admins = $users = 0;
+if (!empty($sessionDir) && is_dir($sessionDir)) {
     foreach (scandir($sessionDir) as $file) {
         if (strpos($file, 'sess_') === 0) {
             $data = @file_get_contents("$sessionDir/$file");
             if ($data && preg_match('/role\|s:\d+:"(admin|user)"/', $data, $m)) {
                 $active++;
-                if ($m[1] === 'admin') $admins++;
-                if ($m[1] === 'user') $users++;
+                $m[1] === 'admin' ? $admins++ : $users++;
             }
         }
     }
 }
 
-$dbh = new PDO("sqlite:users.db");
-$totalUsers = $dbh->query("SELECT COUNT(*) FROM users")->fetchColumn();
-$inactiveUsers = $dbh->query("SELECT COUNT(*) FROM users WHERE active = 0")->fetchColumn();
-$adminUsers = $dbh->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
-$totalLinks = $dbh->query("SELECT COUNT(*) FROM user_links")->fetchColumn();
-$openRequests = $dbh->query("SELECT COUNT(*) FROM link_requests WHERE status = 'open'")->fetchColumn();
+try {
+    $dbh = new PDO("sqlite:users.db");
+    $totalUsers = $dbh->query("SELECT COUNT(*) FROM users")->fetchColumn();
+    $inactiveUsers = $dbh->query("SELECT COUNT(*) FROM users WHERE active = 0")->fetchColumn();
+    $adminUsers = $dbh->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
+    $totalLinks = $dbh->query("SELECT COUNT(*) FROM user_links")->fetchColumn();
+    $openRequests = $dbh->query("SELECT COUNT(*) FROM link_requests WHERE status = 'open'")->fetchColumn();
+} catch (Exception $e) {
+    $totalUsers = $inactiveUsers = $adminUsers = $totalLinks = $openRequests = 0;
+}
+
 $username = $_SESSION['username'] ?? '-';
 ?>
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>system status</title>
-  <link href="./assets/css/bootstrap.min.css" rel="stylesheet">
+    <meta charset="UTF-8">
+    <title>System Status</title>
+    <link href="./assets/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .tooltip-box { display: none; background: #f8f9fa; border: 1px solid #ccc; padding: 8px; margin-top: 4px; }
+        .icon-inline { margin-left: 6px; font-size: 0.9em; color: #666; cursor: pointer; }
+    </style>
+    <script>
+        function toggleTooltip(id) {
+            const el = document.getElementById(id);
+            el.style.display = (el.style.display === 'block') ? 'none' : 'block';
+        }
+    </script>
 </head>
-
-<body class="bg-light"style="font-size: 0.95rem;">
+<body class="bg-light" style="font-size: 0.95rem;">
 <div class="container-fluid mt-4">
 <?php include "admin_tab_nav.php"; ?>
 <div style="width: 90%; margin: 0 auto;">
-  <h5 class="mb-3">system status</h5>
+    <h5 class="mb-3">System Status</h5>
+    <div class="mb-3 fw-bold">Logged in: <strong><?= htmlspecialchars($username) ?></strong> (Session-ID: <?= session_id() ?>)</div>
 
-  <div class="mb-3 text-dark fw-bold" style="font-size: 1rem;">
-    logged in: <strong><?= htmlspecialchars($username) ?></strong>
-    (Session-ID: <?= session_id() ?>)
-  </div>
+    <!-- Database Table -->
+    <table class="table table-bordered table-sm bg-white">
+        <thead class="table-light"><tr>
+            <th>Database File</th><th>Exists</th><th>Readable</th><th>Writable</th><th>CHMOD</th><th>Size</th><th>PDO Write</th>
+        </tr></thead>
+        <tbody>
+            <?php foreach (['users.db', 'cms.db'] as $db): ?>
+            <tr>
+                <td><?= $db ?></td>
+                <td><?= statusBadge($files[$db]['exists']) ?></td>
+                <td><?= statusBadge($files[$db]['readable']) ?></td>
+                <td><?= statusBadge($files[$db]['writable']) ?></td>
+                <td><?= $files[$db]['chmod'] ?></td>
+                <td><?= $files[$db]['size'] ?> B</td>
+                <td>
+                    <?= statusBadge($files[$db]['pdo']) ?>
+                    <?php if (!$files[$db]['pdo']): ?>
+                        <span class="icon-inline" onclick="toggleTooltip('err-<?= $db ?>')">?</span>
+                        <div class="tooltip-box" id="err-<?= $db ?>"><?= htmlspecialchars($files[$db]['pdo_error']) ?></div>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
 
-  <table class="table table-sm table-bordered bg-white shadow-sm">
-    <thead class="table-light">
-      <tr>
-        <th>component</th>
-        <th>exist</th>
-        <th>readable</th>
-        <th>writable</th>
-        <th>Größesize</th>
-        <th>encrypted</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td>users.db - user and links db</td><td><?= statusBadge($dbFileStatus['exists']) ?></td><td><?= statusBadge($dbFileStatus['readable']) ?></td><td><?= statusBadge($dbFileStatus['writable']) ?></td><td><?= $dbFileStatus['size'] ?> B</td><td>-</td></tr>
-      <tr><td>cms.db - mini cms db</td><td><?= statusBadge($dbcms['exists']) ?></td><td><?= statusBadge($dbcms['readable']) ?></td><td><?= statusBadge($dbcms['writable']) ?></td><td><?= $dbcms['size'] ?> B</td><td>-</td></tr>
-      <tr><td>encryption.key - your personal variant</td><td><?= statusBadge($encryption['exists']) ?></td><td><?= statusBadge($encryption['readable']) ?></td><td><?= statusBadge($encryption['writable']) ?></td><td><?= $encryption['size'] ?> B</td><td>-</td></tr>
-      <tr><td>audit.log</td><td><?= statusBadge($audit['exists']) ?></td><td><?= statusBadge($audit['readable']) ?></td><td><?= statusBadge($audit['writable']) ?></td><td><?= $audit['size'] ?> B</td><td>-</td></tr>
-      <tr><td>error.log</td><td><?= statusBadge($error['exists']) ?></td><td><?= statusBadge($error['readable']) ?></td><td><?= statusBadge($error['writable']) ?></td><td><?= $error['size'] ?> B</td><td>-</td></tr>
-      <tr><td>.env - smtp config</td><td><?= statusBadge($env['exists']) ?></td><td><?= statusBadge($env['readable']) ?></td><td><?= statusBadge($env['writable']) ?></td><td><?= $env['size'] ?> B</td><td><?= $envEnc ?></td></tr>
-      <tr><td>.envad - ad config</td><td><?= statusBadge($envad['exists']) ?></td><td><?= statusBadge($envad['readable']) ?></td><td><?= statusBadge($envad['writable']) ?></td><td><?= $envad['size'] ?> B</td><td><?= $envadEnc ?></td></tr>
-    </tbody>
-  </table>
+    <!-- File Status -->
+    <table class="table table-bordered table-sm bg-white">
+        <thead class="table-light"><tr>
+            <th>File</th><th>Exists</th><th>Writable</th><th>CHMOD</th><th>Size</th><th>Encrypted</th>
+        </tr></thead>
+        <tbody>
+            <?php foreach (['encryption.key', 'audit.log', 'error.log', '.env', '.envad'] as $f): ?>
+            <tr>
+                <td><?= $f ?></td>
+                <td><?= statusBadge($files[$f]['exists']) ?></td>
+                <td><?= statusBadge($files[$f]['writable']) ?></td>
+                <td><?= getFilePerms($f) ?></td>
+                <td><?= $files[$f]['size'] ?> B</td>
+                <td><?= $files[$f]['enc'] ?? '-' ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
 
-  <h5 class="mt-4">server informations</h5>
-  <ul class="list-group list-group-flush mb-4">
-    <li class="list-group-item">PHP-version: <?= phpversion() ?></li>
-    <li class="list-group-item">webserver: <?= $_SERVER['SERVER_SOFTWARE'] ?? 'unbekannt' ?></li>
-    <li class="list-group-item">system: <?= PHP_OS ?></li>
-    <li class="list-group-item">PHPMailer exist: <?= statusBadge($mailerStatus === "Ja") ?> – <?= implode(", ", $mailerDiag) ?></li>
-  </ul>
+    <!-- Server Info -->
+    <table class="table table-sm table-bordered bg-white w-100">
+        <thead class="table-light"><tr><th colspan="2">Server Information</th></tr></thead>
+        <tr><td>PHP Version</td><td><?= phpversion() ?></td></tr>
+        <tr><td>Webserver</td><td><?= $_SERVER['SERVER_SOFTWARE'] ?? 'n/a' ?></td></tr>
+        <tr><td>OS</td><td><?= PHP_OS ?></td></tr>
+        <tr><td>PHPMailer</td><td><?= statusBadge($mailerStatus === "Yes") ?> – <?= implode(', ', $mailerDiag) ?></td></tr>
+    </table>
 
-  <h5 class="mt-4">Datenbank-Zusammenfassung</h5>
-  <ul class="list-group list-group-flush mb-4">
-    <li class="list-group-item">all users: <?= $totalUsers ?></li>
-    <li class="list-group-item">active users: <?= $inactiveUsers ?></li>
-    <li class="list-group-item">admin users: <?= $adminUsers ?></li>
-    <li class="list-group-item">saved links: <?= $totalLinks ?></li>
-    <li class="list-group-item">open linkrequests: <?= $openRequests ?></li>
-  </ul>
-
-  </div>
+    <!-- DB Summary -->
+    <table class="table table-sm table-bordered bg-white w-100">
+        <thead class="table-light"><tr><th colspan="2">Database Summary</th></tr></thead>
+        <tr><td>Total Users</td><td><?= $totalUsers ?></td></tr>
+        <tr><td>Inactive Users</td><td><?= $inactiveUsers ?></td></tr>
+        <tr><td>Admin Users</td><td><?= $adminUsers ?></td></tr>
+        <tr><td>Saved Links</td><td><?= $totalLinks ?></td></tr>
+        <tr><td>Open Link Requests</td><td><?= $openRequests ?></td></tr>
+        <tr><td>Active Sessions</td><td><?= $active ?> (<?= $admins ?> admins, <?= $users ?> users)</td></tr>
+    </table>
+</div>
+</div>
 </body>
 </html>

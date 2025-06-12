@@ -118,6 +118,10 @@ else
   exit 1
 fi
 
+divider
+docker exec -w /var/www/html myloginsrv-php rm -f users.db-journal users.db-shm users.db-wal
+
+
 # ------------------------ PHPMailer Installation prüfen ------------------------
 divider
 log_info "Prüfe PHPMailer Installation..."
@@ -164,10 +168,16 @@ $DOCKER_EXEC mkdir -p "$UPLOAD_DIR" && $DOCKER_EXEC chown www-data:www-data "$UP
 log_success "Upload-Verzeichnis vorhanden und Berechtigungen gesetzt."
 
 # Schreibtest im Upload-Verzeichnis
-# $DOCKER_EXEC bash -c "echo 'test' > '$UPLOAD_DIR/$TEST_FILE'" \
-$DOCKER_EXEC sh -c "echo 'test' > '$UPLOAD_DIR/$TEST_FILE'" \
-  && { $DOCKER_EXEC chown www-data:www-data "$UPLOAD_DIR/$TEST_FILE"; log_success "Schreibtest erfolgreich (Datei $TEST_FILE erstellt)."; } \
-  || { log_error "Schreibtest im Upload-Verzeichnis fehlgeschlagen!"; exit 1; }
+
+if $DOCKER_EXEC sh -c "echo 'test' > '$UPLOAD_DIR/$TEST_FILE'"; then
+  $DOCKER_EXEC chown www-data:www-data "$UPLOAD_DIR/$TEST_FILE"
+  log_success "Schreibtest erfolgreich (Datei $TEST_FILE erstellt)."
+else
+  log_error "Schreibtest im Upload-Verzeichnis fehlgeschlagen!"
+  exit 1
+fi
+
+
 # Test-Datei entfernen
 $DOCKER_EXEC rm -f "$UPLOAD_DIR/$TEST_FILE"
 
