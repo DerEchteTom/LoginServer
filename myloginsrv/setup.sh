@@ -42,6 +42,20 @@ fi
 DOCKER_EXEC="docker exec -w /var/www/html $PHP_CONTAINER"
 
 divider
+echo "Fixing ownership of /var/www/html and /var/www/html/uploads inside Docker container..."
+
+# HTML-Verzeichnis rekursiv auf www-data umstellen
+docker exec -u root myloginsrv-php chown -R www-data:www-data /var/www/html
+
+# Sicherheitscheck: uploads/ gezielt noch einmal setzen
+docker exec -u root myloginsrv-php chown -R www-data:www-data /var/www/html/uploads
+
+# Optional: Zeige aktuelle Rechte
+docker exec myloginsrv-php ls -ld /var/www/html /var/www/html/uploads
+
+
+
+divider
 # ------------------------ Umgebung prüfen (.env, .envad) ------------------------
 log_info "Prüfe .env und .envad Konfigurationsdateien..."
 for FILE in ".env" ".envad"; do
