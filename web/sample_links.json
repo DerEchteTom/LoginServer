@@ -1,0 +1,20 @@
+{
+  "assign_to": [
+    "alice",
+    "bob"
+  ],
+  "links": [
+    {
+      "alias": "Heise",
+      "url": "https://www.heise.de"
+    },
+    {
+      "alias": "Golem",
+      "url": "https://www.golem.de"
+    },
+    {
+      "alias": "IT-Magazin",
+      "url": "https://www.itmagazine.ch/"
+    }
+  ]
+}
