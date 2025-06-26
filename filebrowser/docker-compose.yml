@@ -1,0 +1,13 @@
+services:
+  filebrowser:
+    image: filebrowser/filebrowser
+    container_name: filebrowser
+    user: "0:0"
+    ports:
+      - "8083:80"
+    volumes:
+      - "/root/Pictures:/srv"
+      - "./database:/database"
+      - "./config:/config"
+    command: ["--database", "/database/filebrowser.db"]
+    restart: unless-stopped
